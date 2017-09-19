@@ -5,9 +5,10 @@
 #include <BlynkSimpleEsp8266.h>
 
 /* Conf blynk */
-#define BLYNK_TOKEN "XXXX"
-#define WIFI_SSID   "XXXX" 
-#define WIFI_PWD    "XXXX"
+#define BLYNK_TOKEN "30e787df6c7f4591860e691eece5d7da"
+#define WIFI_SSID   "AndroidAP" 
+#define WIFI_PWD    "azertyuiop"
+
 /* GPIO */
 #define GPIO_BP     0
 #define GPIO_LED    13
@@ -60,7 +61,7 @@ int StartStop = false ;
 #define DATA_OUT_CONSIGNE           V1
 #define DATA_OUT_RELAY              V2
 #define DATA_OUT_TEMP_GRAPH         V3
-#define DATA_OUT_STAGE              V4
+#define DATA_OUT_ETAPE              V4
 #define DATA_OUT_LCD                V5
 #define DATA_MINUTES_ALL            V6
 #define DATA_MINUTES_ETAT           V7
@@ -86,16 +87,16 @@ String LCD2 = "";
 /* Machine état brassage */
 typedef enum
 {
-    ETAT_INIT=0,
-    ETAT_EMPATAGE_CHAUFFE,
-    ETAT_EMPATAGE_USER1,
-    ETAT_EMPATAGE,
-    ETAT_EMPATAGE_USER2,
-    ETAT_CHAUFFE,
-    ETAT_FIN
-}tEtat ;
+    ETAPE_INIT=0,
+    ETAPE_EMPATAGE_CHAUFFE,
+    ETAPE_EMPATAGE_USER1,
+    ETAPE_EMPATAGE,
+    ETAPE_EMPATAGE_USER2,
+    ETAPE_CHAUFFE,
+    ETAPE_FIN
+}tEtape ;
 
-tEtat eEtatCourant = ETAT_INIT ;
+tEtape eEtapeCourante = ETAPE_INIT ;
 
 
 
@@ -135,8 +136,8 @@ void loop(void)
   /* Lecture température */
   Temp_val = LectureTemperature();
 
-  /* */
-  MachineEtat();
+  /* Machine etat */
+  Brassage();
 
   /* Update blynk variables */
   BlynkUpdate();
@@ -144,29 +145,29 @@ void loop(void)
 
 
 
-void MachineEtat(void)
+void Brassage(void)
 {
-    switch (eEtatCourant)
+    switch (eEtapeCourante)
     {
-      case ETAT_INIT :
+      case ETAPE_INIT :
         LCD1 = "Set Conf";
-        LCD2 = "+ START";
-        
+        LCD2 = "+ BP to start";
+
+        /* Raz */
+        minutes_etape = 0 ;
+        minutes_all = 0 ;
         RelayOff();
         Temp_consigne = 0 ;
         
-        if (0 != StartStop)
+        if (HIGH != BP_val)
         {
-            /* Raz minutes */
-            minutes_etape = 0 ;
-            minutes_all = 0 ;
             RelayOn();
             Temp_consigne = EmpatageChauffeTemp;
-            eEtatCourant = ETAT_EMPATAGE_CHAUFFE ;
+            eEtapeCourante = ETAPE_EMPATAGE_CHAUFFE ;
         }
         break ;
         
-      case ETAT_EMPATAGE_CHAUFFE :
+      case ETAPE_EMPATAGE_CHAUFFE :
         LCD1 = "Empatage";
         LCD2 = "Chauffe en cours ...";
         if (Temp_val >= (Temp_consigne + Temp_delta))
@@ -174,12 +175,12 @@ void MachineEtat(void)
             /* Raz minutes */
             minutes_etape = 0 ;
             RelayOff();
-            eEtatCourant = ETAT_EMPATAGE_USER1 ;
-            Blynk.notify("Empatage : Fin chauffage eau");
+            eEtapeCourante = ETAPE_EMPATAGE_USER1 ;
+            Blynk.notify("Empatage : Fin chauffage eau");       
         } 
         break ;
       
-      case ETAT_EMPATAGE_USER1 :
+      case ETAPE_EMPATAGE_USER1 :
         LCD1 = "Empatage Ok";
         LCD2 = "BP to continue"; 
         if (HIGH == BP_val)
@@ -187,11 +188,11 @@ void MachineEtat(void)
             /* Raz minutes */
             minutes_etape = 0 ;
             Temp_consigne = EmpatageMaintienTemp ;
-            eEtatCourant = ETAT_EMPATAGE ;
+            eEtapeCourante = ETAPE_EMPATAGE ;
         }
         break ;
         
-    case ETAT_EMPATAGE :
+    case ETAPE_EMPATAGE :
         LCD1 = "Empatage";
         LCD2 = "En cours ..."; 
         if (Temp_val <= (Temp_consigne + Temp_delta))
@@ -205,12 +206,12 @@ void MachineEtat(void)
         {
               /* Raz minutes */
               minutes_etape = 0 ;
-              eEtatCourant = ETAT_EMPATAGE_USER2 ;
+              eEtapeCourante = ETAPE_EMPATAGE_USER2 ;
               Blynk.notify("Empatage : Fin");
         }
         break ;
       
-    case ETAT_EMPATAGE_USER2 :
+    case ETAPE_EMPATAGE_USER2 :
         LCD1 = "Empatage Ok";
         LCD2 = "BP to continue"; 
         if (HIGH == BP_val)
@@ -218,13 +219,14 @@ void MachineEtat(void)
              /* Raz minutes */
               minutes_etape = 0 ;
               Temp_consigne = ChauffeTemp ;
-              eEtatCourant = ETAT_CHAUFFE ;
+              eEtapeCourante = ETAPE_CHAUFFE ;
         }
         break ;
         
-    case ETAT_CHAUFFE :
+    case ETAPE_CHAUFFE :
         LCD1 = "Chauffe";
         LCD2 = "En cours ..."; 
+        
         /* Température >= consigne */
         if (Temp_val >= (Temp_consigne + Temp_delta))
         {
@@ -241,12 +243,12 @@ void MachineEtat(void)
         if (minutes_etape >= ChauffeDuree_min)
         {
               RelayOff(); 
-              eEtatCourant = ETAT_FIN ;
+              eEtapeCourante = ETAPE_FIN ;
               Blynk.notify("Brassage terminé !!!!");
         }
         break ;
         
-     case ETAT_FIN :
+     case ETAPE_FIN :
         LCD1 = "Brassage";
         LCD2 = "Terminé !!!"; 
         break ;
@@ -255,10 +257,10 @@ void MachineEtat(void)
       break ; 
     }
 
-    if ((0 == StartStop)&&(ETAT_INIT != eEtatCourant))
+    if (0 == StartStop)
     {
-        Serial.println("STOP");
-        eEtatCourant = ETAT_INIT ;
+        //Serial.println("STOP");
+        eEtapeCourante = ETAPE_INIT ;
     }
 }
 
@@ -396,7 +398,7 @@ void BlynkUpdate(void)
         Blynk.virtualWrite(DATA_OUT_TEMP, Temp_val);
         Blynk.virtualWrite(DATA_OUT_CONSIGNE, Temp_consigne);
         Blynk.virtualWrite(DATA_OUT_TEMP_GRAPH, Temp_val);
-        Blynk.virtualWrite(DATA_OUT_STAGE, eEtatCourant);
+        Blynk.virtualWrite(DATA_OUT_ETAPE, eEtapeCourante);
         Blynk.virtualWrite(DATA_OUT_RELAY, Relay_val);
         Blynk.virtualWrite(DATA_MINUTES_ALL, minutes_all);
         Blynk.virtualWrite(DATA_MINUTES_ETAT, minutes_etape);
