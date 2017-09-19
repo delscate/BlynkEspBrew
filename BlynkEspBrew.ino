@@ -3,11 +3,7 @@
 #include <DallasTemperature.h>  //Librairie du capteur
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
-
-/* Conf blynk */
-#define BLYNK_TOKEN "XXXX"
-#define WIFI_SSID   "XXXX" 
-#define WIFI_PWD    "XXXX"
+#include "setup.h"
 
 /* GPIO */
 #define GPIO_BP     0
