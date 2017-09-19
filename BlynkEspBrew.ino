@@ -8,7 +8,6 @@
 #define BLYNK_TOKEN "XXXX"
 #define WIFI_SSID   "XXXX" 
 #define WIFI_PWD    "XXXX"
-
 /* GPIO */
 #define GPIO_BP     0
 #define GPIO_LED    13
@@ -175,7 +174,8 @@ void MachineEtat(void)
             /* Raz minutes */
             minutes_etape = 0 ;
             RelayOff();
-            eEtatCourant = ETAT_EMPATAGE_USER1 ;       
+            eEtatCourant = ETAT_EMPATAGE_USER1 ;
+            Blynk.notify("Empatage : Fin chauffage eau");
         } 
         break ;
       
@@ -197,7 +197,8 @@ void MachineEtat(void)
         if (Temp_val <= (Temp_consigne + Temp_delta))
         {
             LCD1 = "Temp. basse";
-            LCD2 = "Ajouter eau"; 
+            LCD2 = "Ajouter eau";
+            Blynk.notify("Empatage : Température trop basse");
         }
 
         if (minutes_etape >= EmpatageMaintienDuree_min)
@@ -205,6 +206,7 @@ void MachineEtat(void)
               /* Raz minutes */
               minutes_etape = 0 ;
               eEtatCourant = ETAT_EMPATAGE_USER2 ;
+              Blynk.notify("Empatage : Fin");
         }
         break ;
       
@@ -240,12 +242,13 @@ void MachineEtat(void)
         {
               RelayOff(); 
               eEtatCourant = ETAT_FIN ;
+              Blynk.notify("Brassage terminé !!!!");
         }
         break ;
         
      case ETAT_FIN :
         LCD1 = "Brassage";
-        LCD2 = "Terminé"; 
+        LCD2 = "Terminé !!!"; 
         break ;
        
      default : 
@@ -397,11 +400,11 @@ void BlynkUpdate(void)
         Blynk.virtualWrite(DATA_OUT_RELAY, Relay_val);
         Blynk.virtualWrite(DATA_MINUTES_ALL, minutes_all);
         Blynk.virtualWrite(DATA_MINUTES_ETAT, minutes_etape);
-
+    
         lcd.clear();
         lcd.print(0, 0, LCD1); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
         lcd.print(0, 1, LCD2); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
-
+    
         /* Relay Status */
         if (HIGH == Relay_val)
         {
@@ -411,7 +414,7 @@ void BlynkUpdate(void)
         {
             ledRelay.off();
         }
-
+    
         /* Maj time blynk sync*/
         timeBlynkLast =  timeNow ;
     }
