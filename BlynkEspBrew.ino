@@ -5,9 +5,9 @@
 #include <BlynkSimpleEsp8266.h>
 
 /* Conf blynk */
-#define BLYNK_TOKEN "30e787df6c7f4591860e691eece5d7da"
-#define WIFI_SSID   "AndroidAP" 
-#define WIFI_PWD    "azertyuiop"
+#define BLYNK_TOKEN "XXXX"
+#define WIFI_SSID   "XXXX" 
+#define WIFI_PWD    "XXXX"
 
 /* GPIO */
 #define GPIO_BP     0
