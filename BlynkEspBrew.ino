@@ -5,6 +5,10 @@
 #include <BlynkSimpleEsp8266.h>
 #include "setup.h"
 
+
+#define BLYNK_DEBUG // Optional, this enables lots of prints
+#define BLYNK_PRINT Serial
+
 /* GPIO */
 #define GPIO_BP     0
 #define GPIO_LED    13
@@ -34,66 +38,72 @@ unsigned long timeNow = 0;
 unsigned long timeLast = 0;
 int seconds = 0;
 int minutes = 0;
-int hours = 0;
 
 int minutes_etape = 0 ;
+int minutes_etape_conf = 0 ;
+int minutes_etape_reste = 0 ;
 int minutes_all = 0 ;
 
-
 /* Parametres */
-int EmpatageChauffeTemp = 0 ;
-int EmpatageMaintienTemp = 0 ;
-int EmpatageMaintienDuree_min = 0 ;
+int ParamEmpatageTemperature = 0xFF ;       // La consigne doit etre au dessus
+int ParamEmpatageMaintienTemperature = 0 ;  // La consigne doit etre en dessous
+int ParamEmpatageMaintienDuree_min = 0 ;
 
-int ChauffeTemp = 0 ;
-int ChauffeDuree_min = 0 ;
+int ParamEbullitionTemperature = 0xFF ;     // La consigne doit etre au dessus
+int ParamEbullitionDuree_min = 0 ;
 
-  
+int ParamRefroidissementTemperature = 0 ;   // La consigne doit etre en dessous
 
-int StartStop = false ; 
+int StartStop = 0 ; 
+
+bool bEmpatageTempTropBasse = false  ;
+bool bEmpatageTempOk = false  ;
+
+bool bPremierDepassementConsigne = false ; 
 
 /* Datas Blynk */
-#define DATA_OUT_TEMP               V0
-#define DATA_OUT_CONSIGNE           V1
-#define DATA_OUT_RELAY              V2
-#define DATA_OUT_TEMP_GRAPH         V3
-#define DATA_OUT_ETAPE              V4
-#define DATA_OUT_LCD                V5
-#define DATA_MINUTES_ALL            V6
-#define DATA_MINUTES_ETAT           V7
+#define DATA_OUT_TEMP                 V0
+#define DATA_OUT_CONSIGNE             V1
+#define DATA_OUT_RELAY                V2
+#define DATA_OUT_LCD                  V3
+#define DATA_OUT_MINUTES_ALL          V4
+#define DATA_OUT_MINUTES_ETAPE        V5
+#define DATA_OUT_MINUTES_ETAPE_CONF   V6
+#define DATA_OUT_MINUTES_ETAPE_RESTE  V7
+#define DATA_OUT_TERMINAL             V8
 
-#define DATE_IN_START_STOP          V10
+#define DATA_IN_START_STOP            V10
 
-#define DATE_IN_C_EMPATAGE_CHAUFFE  V20
-#define DATE_IN_C_EMPATAGE_MAINTIEN V21
-#define DATE_IN_C_EMPATAGE_TEMPS    V22
-#define DATE_IN_C_CHAUFFE           V23
-#define DATE_IN_C_CHAUFFE_TEMPS     V24
+#define DATA_IN_PARAM_EMPATAGE_TEMP             V20
+#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_TEMP    V21
+#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_DUREE   V22
+#define DATA_IN_PARAM_EBULLITION_TEMP           V23
+#define DATA_IN_PARAM_EBULLITION_DUREE          V24
+#define DATA_IN_PARAM_REFROIDISSEMENT_TEMP      V25
 
-unsigned long timeBlynkLast = 0 ;
-#define BLYNK_UPDATE_SEC              2
-
+BlynkTimer timerUpdate;
 
 WidgetLED ledRelay(DATA_OUT_RELAY);
 WidgetLCD lcd(DATA_OUT_LCD);
-String LCD1 = "";
-String LCD2 = "";
+WidgetTerminal terminal(DATA_OUT_TERMINAL);
 
 
 /* Machine état brassage */
 typedef enum
 {
-    ETAPE_INIT=0,
-    ETAPE_EMPATAGE_CHAUFFE,
+    ETAPE_STOP=0,
+    ETAPE_CONF,
+    ETAPE_EMPATAGE_CHAUFFAGE,
     ETAPE_EMPATAGE_USER1,
     ETAPE_EMPATAGE,
     ETAPE_EMPATAGE_USER2,
-    ETAPE_CHAUFFE,
+    ETAPE_EBULLITION,
+    ETAPE_EBULLITION_USER1,
+    ETAPE_REFROIDISSEMENT,
     ETAPE_FIN
 }tEtape ;
 
-tEtape eEtapeCourante = ETAPE_INIT ;
-
+tEtape eEtapeCourante = ETAPE_STOP ;
 
 
 void setup(void)
@@ -107,126 +117,175 @@ void setup(void)
     pinMode(GPIO_BP, INPUT);
     pinMode(GPIO_TEMP, INPUT);
 
+    /* force relay */
+    RelayOff();
+
     LedOn();
+    
     sensors.begin();                                  //Activation des capteurs
     sensors.getAddress(sensorDeviceAddress, 0);       //Demande l'adresse du capteur à l'index 0 du bus
     sensors.setResolution(sensorDeviceAddress, 10);   //Résolutions possibles: 9,10,11,12 -> 10 = 0.25°C
 
-    Blynk.begin(BLYNK_TOKEN,WIFI_SSID,WIFI_PWD);
     InitTime();
 
-    LedOff();
-    RelayOff();
+    Serial.println("Blynk init ...");
+    Blynk.begin(BLYNK_TOKEN,WIFI_SSID,WIFI_PWD);
+    Serial.println("Blynk init Ok");
+  
+    LedOff();    
+
+    // Setup a function to be called every second
+    timerUpdate.setInterval(1000L, BlynkUpdate);
+    
     Serial.println("Init Ok");
 }
 
 
 void loop(void)
 {
-  //  Serial.println("******");
-  MajTime();
+    //  Serial.println("******");
+    MajTime();
+    
+    /* Lecure BP */
+    BP_val = LectureBouton();
   
-  /* Lecure BP */
-  BP_val = LectureBouton();
-
-  /* Lecture température */
-  Temp_val = LectureTemperature();
-
-  /* Machine etat */
-  Brassage();
-
-  /* Update blynk variables */
-  BlynkUpdate();
+    /* Lecture température */
+    Temp_val = LectureTemperature();
+  
+    /* Machine etat */
+    Brassage();
+  
+    /* Update blynk */
+    BlynkRun();
 }
-
 
 
 void Brassage(void)
 {
     switch (eEtapeCourante)
     {
-      case ETAPE_INIT :
-        LCD1 = "Set Conf";
-        LCD2 = "+ BP to start";
-
+      case ETAPE_STOP :
         /* Raz */
-        minutes_etape = 0 ;
         minutes_all = 0 ;
+        minutes_etape = 0 ;
+        minutes_etape_conf = 0 ;
+        minutes_etape_reste = 0 ;
+
         RelayOff();
-        Temp_consigne = 0 ;
         
-        if (HIGH != BP_val)
+        Temp_consigne = 0 ;
+        bPremierDepassementConsigne = false ;
+        
+        if (1 == StartStop)
         {
-            RelayOn();
-            Temp_consigne = EmpatageChauffeTemp;
-            eEtapeCourante = ETAPE_EMPATAGE_CHAUFFE ;
+            eEtapeCourante = ETAPE_CONF ;
+            BlynkLcd("Set Conf","+ BP to start");
         }
         break ;
         
-      case ETAPE_EMPATAGE_CHAUFFE :
-        LCD1 = "Empatage";
-        LCD2 = "Chauffe en cours ...";
+      case ETAPE_CONF :
+        if (HIGH == BP_val)
+        {
+            minutes_etape = 0 ;
+            RelayOn();
+            eEtapeCourante = ETAPE_EMPATAGE_CHAUFFAGE ;
+            BlynkLcd("Empatage","Chauf. en cours ...");
+        }
+        break ;
+        
+      case ETAPE_EMPATAGE_CHAUFFAGE :
+        Temp_consigne = ParamEmpatageTemperature;
         if (Temp_val >= (Temp_consigne + Temp_delta))
         {
-            /* Raz minutes */
-            minutes_etape = 0 ;
             RelayOff();
             eEtapeCourante = ETAPE_EMPATAGE_USER1 ;
-            Blynk.notify("Empatage : Fin chauffage eau");       
+            
+            BlynkLcd("Empatage Ok","BP to continue"); 
+            
+            terminal.print("Empatage - Durée chauffage eau : " );
+            terminal.print(minutes_etape);
+            terminal.println(" min");
+            terminal.flush();
+            
+            BlynkNotification("Empatage : Fin chauffage eau");  
         } 
         break ;
       
       case ETAPE_EMPATAGE_USER1 :
-        LCD1 = "Empatage Ok";
-        LCD2 = "BP to continue"; 
         if (HIGH == BP_val)
         {
             /* Raz minutes */
             minutes_etape = 0 ;
-            Temp_consigne = EmpatageMaintienTemp ;
             eEtapeCourante = ETAPE_EMPATAGE ;
+            BlynkLcd("Empatage","En cours ...");
         }
         break ;
         
     case ETAPE_EMPATAGE :
-        LCD1 = "Empatage";
-        LCD2 = "En cours ..."; 
+        Temp_consigne = ParamEmpatageMaintienTemperature ;
+        minutes_etape_conf = ParamEmpatageMaintienDuree_min ;
+        
         if (Temp_val <= (Temp_consigne + Temp_delta))
         {
-            LCD1 = "Temp. basse";
-            LCD2 = "Ajouter eau";
-            Blynk.notify("Empatage : Température trop basse");
+            if (false == bEmpatageTempTropBasse)
+            {
+                BlynkLcd("Temp. basse","Ajouter eau");
+                BlynkNotification("Empatage : Température trop basse");
+                bEmpatageTempTropBasse = true ;
+                bEmpatageTempOk = false ;
+            }
         }
-
-        if (minutes_etape >= EmpatageMaintienDuree_min)
+        else
         {
-              /* Raz minutes */
-              minutes_etape = 0 ;
+            if (false == bEmpatageTempOk)
+            {
+                BlynkLcd("Empatage","En cours ...");
+                bEmpatageTempOk = true ;
+                bEmpatageTempTropBasse = false;
+            }
+        }
+        
+        if (minutes_etape >= minutes_etape_conf)
+        {
               eEtapeCourante = ETAPE_EMPATAGE_USER2 ;
-              Blynk.notify("Empatage : Fin");
+
+              BlynkLcd("Empatage Ok","BP to continue");
+
+              terminal.print("Empatage - Durée : " );
+              terminal.print(minutes_etape);
+              terminal.println(" min");
+              terminal.flush();
+
+              BlynkNotification("Empatage : Fin");
         }
         break ;
       
     case ETAPE_EMPATAGE_USER2 :
-        LCD1 = "Empatage Ok";
-        LCD2 = "BP to continue"; 
         if (HIGH == BP_val)
         {
              /* Raz minutes */
               minutes_etape = 0 ;
-              Temp_consigne = ChauffeTemp ;
-              eEtapeCourante = ETAPE_CHAUFFE ;
+              eEtapeCourante = ETAPE_EBULLITION ;
+              BlynkLcd("Ebullition","Chauff. En cours");
         }
         break ;
         
-    case ETAPE_CHAUFFE :
-        LCD1 = "Chauffe";
-        LCD2 = "En cours ..."; 
-        
+    case ETAPE_EBULLITION :
+        Temp_consigne = ParamEbullitionTemperature ;
+        minutes_etape_conf = ParamEbullitionDuree_min ;
         /* Température >= consigne */
         if (Temp_val >= (Temp_consigne + Temp_delta))
         {
-            RelayOff();     
+            RelayOff();
+
+            if (false == bPremierDepassementConsigne)
+            {
+                bPremierDepassementConsigne = true ;
+                terminal.print("Ebullition - 1er depassement durée : " );
+                terminal.print(minutes_etape);
+                terminal.println(" min");
+                terminal.flush();
+            }   
         }
         else if  (Temp_val <= (Temp_consigne - Temp_delta))
         {
@@ -236,17 +295,49 @@ void Brassage(void)
         {}
 
         /* Durée Max */
-        if (minutes_etape >= ChauffeDuree_min)
+        if (minutes_etape >= minutes_etape_conf)
         {
-              RelayOff(); 
-              eEtapeCourante = ETAPE_FIN ;
-              Blynk.notify("Brassage terminé !!!!");
+              RelayOff();
+              eEtapeCourante = ETAPE_EBULLITION_USER1 ;
+
+              BlynkLcd("Ebullition Ok","BP to continue");
+
+              terminal.print("Ebullition - Durée : " );
+              terminal.print(minutes_etape);
+              terminal.println(" min");
+              terminal.flush();
+                            
+              BlynkNotification("Ebullition terminée !!!!");
         }
         break ;
-        
+
+     case ETAPE_EBULLITION_USER1 :
+        if (HIGH == BP_val)
+        {
+             /* Raz minutes */
+              minutes_etape = 0 ;
+              eEtapeCourante = ETAPE_REFROIDISSEMENT ;
+              BlynkLcd("Refroidissement","En cours ...");
+        }
+        break ;
+
+    case ETAPE_REFROIDISSEMENT :
+        Temp_consigne = ParamRefroidissementTemperature ;
+        if (Temp_val <= (Temp_consigne + Temp_delta))
+        {
+            eEtapeCourante = ETAPE_FIN ;
+            BlynkLcd("Refroidissement","terminée !!!!");
+
+            terminal.print("Refroidissement - Durée : " );
+            terminal.print(minutes_etape);
+            terminal.println(" min");
+            terminal.flush();
+            
+            BlynkNotification("Refroidissement terminée !!!!");
+        }
+        break;
+    
      case ETAPE_FIN :
-        LCD1 = "Brassage";
-        LCD2 = "Terminé !!!"; 
         break ;
        
      default : 
@@ -256,7 +347,7 @@ void Brassage(void)
     if (0 == StartStop)
     {
         //Serial.println("STOP");
-        eEtapeCourante = ETAPE_INIT ;
+        eEtapeCourante = ETAPE_STOP ;
     }
 }
 
@@ -348,13 +439,13 @@ void MajTime(void)
         
         /* Maj variables */
         minutes_etape = minutes_etape + 1;
-        minutes_all = minutes_all + 1;
+        minutes_all = minutes_all + 1;  
     }
-    //if one minute has passed, start counting milliseconds from zero again and add one minute to the clock.
-    if (minutes >= 60)
+
+    /* Maj reste étape */
+    if((0 != minutes_etape_conf)&& (minutes_etape_conf > minutes_etape))
     {
-        minutes = 0;
-        hours = hours + 1;
+        minutes_etape_reste = minutes_etape_conf - minutes_etape ;
     }
 
     /*Serial.print("Time : ");
@@ -371,50 +462,99 @@ void MajTime(void)
 */
 
 /* SYNC CONNECT */
+
 bool isFirstConnect = true;
 
 BLYNK_CONNECTED()
 {
-    if (isFirstConnect)
+    if (true == isFirstConnect)
     {
+        Serial.println("Blynk connect ...");
+            
+        /* Bouton sur stop à l'init */
+        Blynk.virtualWrite(DATA_IN_START_STOP,0);
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ALL,0);
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE,0);
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_CONF,"-");
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_RESTE,"-");
+        ledRelay.off();
+        delay(100); 
+        BlynkLcd("Appuyer sur start","pour commencer");
+        
         Blynk.syncAll();
-        Serial.print("BLYNK SYNC");
+        Serial.println("Blynk connect Ok");
         isFirstConnect = false;
     }
 }
 
-void BlynkUpdate(void)
+
+void BlynkLcd(const char * pLigne1, const char * pLigne2)
+{
+    lcd.clear();
+    if (NULL != pLigne1)
+    {        
+        lcd.print(0,0,pLigne1);
+    }  
+    if (NULL != pLigne2)
+    {
+        lcd.print(0,1,pLigne2);
+    }
+    /* force run */
+    Blynk.run();
+}
+
+
+void BlynkNotification(const char * pMessage)
+{
+    if (NULL != pMessage)
+    {
+        /* force run before */
+        Blynk.run();
+        Blynk.notify(pMessage);
+    }
+}
+
+
+
+void BlynkRun(void)
 {
     /* Blynk run */
     Blynk.run();
 
-    if ((timeNow - timeBlynkLast) >= BLYNK_UPDATE_SEC)
+    /* update timer */
+    timerUpdate.run(); // Initiates BlynkTimer
+}
+
+
+void BlynkUpdate(void)
+{
+    Serial.println("Update Blynk");
+    
+    Blynk.virtualWrite(DATA_OUT_TEMP, Temp_val);
+    Blynk.virtualWrite(DATA_OUT_CONSIGNE, Temp_consigne);
+          
+    Blynk.virtualWrite(DATA_OUT_MINUTES_ALL, minutes_all);
+    Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE,minutes_etape);
+    
+    if (0 == minutes_etape_conf)
     {
-        Serial.println("Update Blynk");
-        Blynk.virtualWrite(DATA_OUT_TEMP, Temp_val);
-        Blynk.virtualWrite(DATA_OUT_CONSIGNE, Temp_consigne);
-        Blynk.virtualWrite(DATA_OUT_TEMP_GRAPH, Temp_val);
-        Blynk.virtualWrite(DATA_OUT_ETAPE, eEtapeCourante);
-        Blynk.virtualWrite(DATA_OUT_RELAY, Relay_val);
-        Blynk.virtualWrite(DATA_MINUTES_ALL, minutes_all);
-        Blynk.virtualWrite(DATA_MINUTES_ETAT, minutes_etape);
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_CONF, "-");
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_RESTE,"-");
+    }
+    else
+    {
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_CONF, minutes_etape_conf);
+        Blynk.virtualWrite(DATA_OUT_MINUTES_ETAPE_RESTE, minutes_etape_reste);
+    }
     
-        lcd.clear();
-        lcd.print(0, 0, LCD1); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
-        lcd.print(0, 1, LCD2); // use: (position X: 0-15, position Y: 0-1, "Message you want to print")
-    
-        /* Relay Status */
-        if (HIGH == Relay_val)
-        {
-            ledRelay.on();
-        }
-        else
-        {
-            ledRelay.off();
-        }
-    
-        /* Maj time blynk sync*/
-        timeBlynkLast =  timeNow ;
+    /* Relay Status */
+    if (HIGH == Relay_val)
+    {
+        ledRelay.on();
+    }
+    else
+    {
+        ledRelay.off();
     }
 }
 
@@ -422,7 +562,7 @@ void BlynkUpdate(void)
 /************************************************
  * BOUTON START/STOP
  */
-BLYNK_WRITE(DATE_IN_START_STOP)
+BLYNK_WRITE(DATA_IN_START_STOP)
 {
     StartStop = param.asInt(); 
     Serial.print("StartStop :");
@@ -434,38 +574,47 @@ BLYNK_WRITE(DATE_IN_START_STOP)
  */
 
 /* Empatage */
-BLYNK_WRITE(DATE_IN_C_EMPATAGE_CHAUFFE)
+BLYNK_WRITE(DATA_IN_PARAM_EMPATAGE_TEMP)
 {
-    EmpatageChauffeTemp = param.asInt(); 
+    ParamEmpatageTemperature = param.asInt(); 
     Serial.print("Empatage Temp Chauffe :");
-    Serial.println(EmpatageChauffeTemp);
+    Serial.println(ParamEmpatageTemperature);
 }
 
-BLYNK_WRITE(DATE_IN_C_EMPATAGE_MAINTIEN)
+BLYNK_WRITE(DATA_IN_PARAM_EMPATAGE_MAINTIEN_TEMP)
 {
-    EmpatageMaintienTemp = param.asInt(); 
-    Serial.print("Empatage Temp Maintien :");
-    Serial.println(EmpatageMaintienTemp);
+    ParamEmpatageMaintienTemperature = param.asInt(); 
+    Serial.print("Param Empatage Temp Maintien :");
+    Serial.println(ParamEmpatageMaintienTemperature);
 }
 
-BLYNK_WRITE(DATE_IN_C_EMPATAGE_TEMPS)
+BLYNK_WRITE(DATA_IN_PARAM_EMPATAGE_MAINTIEN_DUREE)
 {
-    EmpatageMaintienDuree_min = param.asInt(); 
-    Serial.print("Empatage Durée Maintien :");
-    Serial.println(EmpatageMaintienDuree_min);
+    ParamEmpatageMaintienDuree_min = param.asInt(); 
+    Serial.print("Param Empatage Durée Maintien :");
+    Serial.println(ParamEmpatageMaintienDuree_min);
 }
 
 /* Chauffe */
-BLYNK_WRITE(DATE_IN_C_CHAUFFE)
+BLYNK_WRITE(DATA_IN_PARAM_EBULLITION_TEMP)
 {
-    ChauffeTemp = param.asInt(); 
-    Serial.print("Chauffe Temp :");
-    Serial.println(ChauffeTemp );
+    ParamEbullitionTemperature = param.asInt(); 
+    Serial.print("Param Ebullition Temp :");
+    Serial.println(ParamEbullitionTemperature);
 }
 
-BLYNK_WRITE(DATE_IN_C_CHAUFFE_TEMPS)
+BLYNK_WRITE(DATA_IN_PARAM_EBULLITION_DUREE)
 {
-    ChauffeDuree_min = param.asInt(); 
-    Serial.print("Chauffe Durée :");
-    Serial.println(ChauffeDuree_min );
+    ParamEbullitionDuree_min = param.asInt(); 
+    Serial.print("Param Ebullition Durée :");
+    Serial.println(ParamEbullitionDuree_min);
 }
+
+/* Refroidissement */
+BLYNK_WRITE(DATA_IN_PARAM_REFROIDISSEMENT_TEMP)
+{
+    ParamRefroidissementTemperature = param.asInt(); 
+    Serial.print("Param Refroidissement Temp :");
+    Serial.println(ParamRefroidissementTemperature);
+}
+
