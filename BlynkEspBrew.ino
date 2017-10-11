@@ -28,7 +28,6 @@ DeviceAddress sensorDeviceAddress;
 /* Variables internes */
 float   Temp_val ;
 float   Temp_consigne = 0 ;
-float   Temp_delta = 0.5;
 
 int     BP_val = LOW ;
 int     Relay_val = LOW ;
@@ -45,6 +44,7 @@ int minutes_etape_reste = 0 ;
 int minutes_all = 0 ;
 
 /* Parametres */
+float ParamHysteresis = 0.5 ;
 int ParamEmpatageTemperature = 0xFF ;       // La consigne doit etre au dessus
 int ParamEmpatageMaintienTemperature = 0 ;  // La consigne doit etre en dessous
 int ParamEmpatageMaintienDuree_min = 0 ;
@@ -74,12 +74,13 @@ bool bPremierDepassementConsigne = false ;
 
 #define DATA_IN_START_STOP            V10
 
-#define DATA_IN_PARAM_EMPATAGE_TEMP             V20
-#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_TEMP    V21
-#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_DUREE   V22
-#define DATA_IN_PARAM_EBULLITION_TEMP           V23
-#define DATA_IN_PARAM_EBULLITION_DUREE          V24
-#define DATA_IN_PARAM_REFROIDISSEMENT_TEMP      V25
+#define DATA_IN_PARAM_HYSTERESIS                V20
+#define DATA_IN_PARAM_EMPATAGE_TEMP             V21
+#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_TEMP    V22
+#define DATA_IN_PARAM_EMPATAGE_MAINTIEN_DUREE   V23
+#define DATA_IN_PARAM_EBULLITION_TEMP           V24
+#define DATA_IN_PARAM_EBULLITION_DUREE          V25
+#define DATA_IN_PARAM_REFROIDISSEMENT_TEMP      V26
 
 BlynkTimer timerUpdate;
 
@@ -195,7 +196,7 @@ void Brassage(void)
         
       case ETAPE_EMPATAGE_CHAUFFAGE :
         Temp_consigne = ParamEmpatageTemperature;
-        if (Temp_val >= (Temp_consigne + Temp_delta))
+        if (Temp_val >= (Temp_consigne + ParamHysteresis))
         {
             RelayOff();
             eEtapeCourante = ETAPE_EMPATAGE_USER1 ;
@@ -225,7 +226,7 @@ void Brassage(void)
         Temp_consigne = ParamEmpatageMaintienTemperature ;
         minutes_etape_conf = ParamEmpatageMaintienDuree_min ;
         
-        if (Temp_val <= (Temp_consigne + Temp_delta))
+        if (Temp_val <= (Temp_consigne + ParamHysteresis))
         {
             if (false == bEmpatageTempTropBasse)
             {
@@ -274,7 +275,7 @@ void Brassage(void)
         Temp_consigne = ParamEbullitionTemperature ;
         minutes_etape_conf = ParamEbullitionDuree_min ;
         /* Température >= consigne */
-        if (Temp_val >= (Temp_consigne + Temp_delta))
+        if (Temp_val >= (Temp_consigne + ParamHysteresis))
         {
             RelayOff();
 
@@ -287,7 +288,7 @@ void Brassage(void)
                 terminal.flush();
             }   
         }
-        else if  (Temp_val <= (Temp_consigne - Temp_delta))
+        else if  (Temp_val <= (Temp_consigne - ParamHysteresis))
         {
             RelayOn();
         }
@@ -323,7 +324,7 @@ void Brassage(void)
 
     case ETAPE_REFROIDISSEMENT :
         Temp_consigne = ParamRefroidissementTemperature ;
-        if (Temp_val <= (Temp_consigne + Temp_delta))
+        if (Temp_val <= (Temp_consigne + ParamHysteresis))
         {
             eEtapeCourante = ETAPE_FIN ;
             BlynkLcd("Refroidissement","terminée !!!!");
@@ -572,6 +573,15 @@ BLYNK_WRITE(DATA_IN_START_STOP)
 /************************************************
  * PARAMETRES
  */
+
+/* Hysteresis */
+BLYNK_WRITE(DATA_IN_PARAM_HYSTERESIS)
+{
+    ParamHysteresis = ((float)param.asInt()) / 10; 
+    Serial.print("Hysteresis :");
+    Serial.println(ParamHysteresis);
+}
+
 
 /* Empatage */
 BLYNK_WRITE(DATA_IN_PARAM_EMPATAGE_TEMP)
