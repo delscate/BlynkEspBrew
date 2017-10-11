@@ -226,7 +226,7 @@ void Brassage(void)
         Temp_consigne = ParamEmpatageMaintienTemperature ;
         minutes_etape_conf = ParamEmpatageMaintienDuree_min ;
         
-        if (Temp_val <= (Temp_consigne + ParamHysteresis))
+        if (Temp_val <= (Temp_consigne - ParamHysteresis))
         {
             if (false == bEmpatageTempTropBasse)
             {
