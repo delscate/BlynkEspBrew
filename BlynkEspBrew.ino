@@ -264,7 +264,7 @@ void Brassage(void)
     case ETAPE_EMPATAGE_USER2 :
         if (HIGH == BP_val)
         {
-             /* Raz minutes */
+              /* Raz minutes */
               minutes_etape = 0 ;
               eEtapeCourante = ETAPE_EBULLITION ;
               BlynkLcd("Ebullition","Chauff. En cours");
@@ -274,6 +274,7 @@ void Brassage(void)
     case ETAPE_EBULLITION :
         Temp_consigne = ParamEbullitionTemperature ;
         minutes_etape_conf = ParamEbullitionDuree_min ;
+        
         /* Température >= consigne */
         if (Temp_val >= (Temp_consigne + ParamHysteresis))
         {
@@ -282,6 +283,9 @@ void Brassage(void)
             if (false == bPremierDepassementConsigne)
             {
                 bPremierDepassementConsigne = true ;
+                /* Raz minutes */
+                minutes_etape = 0 ;
+                
                 terminal.print("Ebullition - 1er depassement durée : " );
                 terminal.print(minutes_etape);
                 terminal.println(" min");
